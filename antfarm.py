@@ -12,7 +12,6 @@ from selenium.webdriver.chrome.options import Options
 
 # ========== 配置区 ==========
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
-# 备选网页列表（GitHub海外IP容易被拦截，多站点轮询）
 URL_LIST = [
     "https://app.ali213.net/gl/562127.html",
     "https://www.duotegame.com/mgl/25944.html",
@@ -22,8 +21,22 @@ SCREENSHOT_RAW = "screenshot_raw.png"
 SCREENSHOT_COMPRESS = "screenshot.jpg"
 # ============================
 
+def is_valid_image(file_path):
+    """校验图片是否有效，过滤空白/0字节损坏图片"""
+    if not os.path.exists(file_path):
+        return False
+    if os.path.getsize(file_path) < 2000: #小于2KB判定为空空白截图
+        print(f"⚠️图片过小，判定为空白截图，跳过，大小：{os.path.getsize(file_path)}")
+        return False
+    try:
+        with Image.open(file_path) as im:
+            im.verify()
+        return True
+    except Exception as e:
+        print(f"⚠️图片文件损坏：{e}")
+        return False
+
 def compress_img(in_path, out_path, max_w=900, quality=70):
-    """图片压缩，适配企业微信图片上传限制"""
     img = Image.open(in_path)
     w, h = img.size
     if w > max_w:
@@ -43,12 +56,18 @@ def send_wecom_msg(img_path=None, fail_msg:str=None):
         print("告警推送结果：",resp.text)
         return
 
+    # ======修复40004核心：完整三元组上传======
     upload_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={WECOM_KEY}&type=image"
     with open(img_path, "rb") as f:
-        r_upload = requests.post(upload_url, files={"media":f})
+        r_upload = requests.post(
+            upload_url,
+            files={
+                "media": ("screenshot.jpg", f.read(), "image/jpeg")
+            }
+        )
     res_upload = r_upload.json()
+    print("素材上传返回：", res_upload)
     if res_upload.get("errcode") !=0:
-        print("图片上传失败：", res_upload)
         send_wecom_msg(fail_msg=f"图片上传失败:{res_upload}")
         return False
     media_id = res_upload["media_id"]
@@ -74,6 +93,10 @@ def capture_page(url):
         driver.get(url)
         driver.implicitly_wait(10)
         driver.save_screenshot(SCREENSHOT_RAW)
+        # 校验原始截图是否有效
+        if not is_valid_image(SCREENSHOT_RAW):
+            print(f"❌页面 {url} 截图是空白无效图，跳过")
+            return None
         compress_img(SCREENSHOT_RAW, SCREENSHOT_COMPRESS)
         print(f"✅ {url} 截图压缩完成")
         return SCREENSHOT_COMPRESS
@@ -95,13 +118,17 @@ shot_file = None
 for target_url in URL_LIST:
     shot_file = capture_page(target_url)
     if shot_file:
-        break
+        #二次校验压缩后图片
+        if is_valid_image(shot_file):
+            break
+        else:
+            shot_file = None
 
 if shot_file:
     send_wecom_msg(img_path=shot_file)
     if os.path.exists(shot_file):
         os.remove(shot_file)
 else:
-    err_text = "全部站点截图失败，大概率GitHub海外IP被网站拦截"
+    err_text = "全部站点截图失败，GitHub海外IP大概率被目标网站拦截，页面返回空白"
     print(err_text)
     send_wecom_msg(fail_msg=err_text)
