@@ -4,10 +4,10 @@ import requests
 import re
 
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
-# 备选网页列表
+# 优先游侠网链接，备用多特
 URL_LIST = [
-    "https://www.duotegame.com/mgl/25944.html",
-    "https://app.ali213.net/gl/562127.html"
+    "https://app.ali213.net/gl/562127.html",
+    "https://www.duotegame.com/mgl/25944.html"
 ]
 
 def send_wechat_text(title, content):
@@ -31,15 +31,19 @@ def get_answer(url):
         resp.raise_for_status()
         html = resp.text
 
-        # 正则匹配题目和答案（根据多特游戏网页适配）
-        pattern_q = re.compile(r"题目[:：](.*?)答案[:：]([A-D])", re.S)
-        result = pattern_q.search(html)
+        # 匹配【日期】后面的两组问答，游侠网页面专用正则
+        pattern = re.compile(r"【(\d+\.\d+)】\s*(.*?\？)\s*(\w+)\s*(.*?\？)\s*(\w+)", re.S)
+        result = pattern.search(html)
         if result:
-            question = result.group(1).strip()
-            ans = result.group(2).strip()
-            return f"**题目**：{question}\n**答案：{ans}**"
+            date_str = result.group(1).strip()
+            q1 = result.group(2).strip()
+            ans1 = result.group(3).strip()
+            q2 = result.group(4).strip()
+            ans2 = result.group(5).strip()
+            out_text = f"📅 {date_str}\n1. {q1}\n✅答案：{ans1}\n\n2. {q2}\n✅答案：{ans2}"
+            return out_text
         else:
-            print(f"页面{url}找到页面，但没有匹配到答案")
+            print(f"页面{url}访问成功，但是没有匹配到问答内容")
             return None
     except Exception as e:
         print(f"访问 {url} 失败: {str(e)}")
@@ -57,4 +61,4 @@ if __name__ == "__main__":
     if final_content:
         send_wechat_text("【蚂蚁庄园每日答案】", final_content)
     else:
-        send_wechat_text("【蚂蚁庄园任务告警】", "所有网页抓取失败，GitHub海外IP被拦截")
+        send_wechat_text("【蚂蚁庄园任务告警】", "所有网页抓取失败，GitHub海外IP被拦截或者页面解析失败")
