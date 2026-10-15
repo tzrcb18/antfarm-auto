@@ -11,10 +11,11 @@ URL_LIST = [
 
 def send_wechat_text(title, content):
     webhook = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_KEY}"
+    # 改成 text 类型，个人微信可以直接看到内容！
     msg = {
-        "msgtype": "markdown",
-        "markdown": {
-            "content": f"## {title}\n{content}"
+        "msgtype": "text",
+        "text": {
+            "content": f"{title}\n{content}"
         }
     }
     res = requests.post(webhook, json=msg)
@@ -26,14 +27,12 @@ def get_answer(url):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
         }
         resp = requests.get(url, headers=headers, timeout=15)
-        # 强制utf8，解决乱码！核心修复点
         resp.encoding = "utf-8"
         html = resp.text
         soup = BeautifulSoup(html, "html.parser")
         pure_text = soup.get_text(separator="\n")
         print("页面纯文本:\n", pure_text[:1500])
 
-        # 匹配【月.日】后面两组问答，宽松匹配
         pattern = re.compile(r"【(\d+\.\d+)】\s*(.*?？)\s*(\w+)\s*(.*?？)\s*(\w+)", re.S)
         match = pattern.search(pure_text)
         if match:
