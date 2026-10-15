@@ -2,16 +2,12 @@
 import os
 import requests
 import re
+from bs4 import BeautifulSoup
 
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
 URL_LIST = [
     "https://app.ali213.net/gl/562127.html"
 ]
-
-def remove_html_tags(text):
-    """删除全部html标签，只保留文字"""
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
 
 def send_wechat_text(title, content):
     webhook = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_KEY}"
@@ -27,31 +23,32 @@ def send_wechat_text(title, content):
 def get_answer(url):
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
         }
         resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
+        # 强制utf8，解决乱码！核心修复点
+        resp.encoding = "utf-8"
         html = resp.text
-        # 第一步：剥离所有HTML标签，拿到纯净文本
-        pure_text = remove_html_tags(html)
-        # 多行模式，宽松匹配【日期】，后面抓取两行问答，问号分割题目答案
-        pattern = re.compile(r"【(\d+\.\d+)】.*?([^？]+？)(\w+).*?([^？]+？)(\w+)", re.S)
-        result = pattern.search(pure_text)
-        if result:
-            date_str = result.group(1).strip()
-            q1 = result.group(2).strip()
-            ans1 = result.group(3).strip()
-            q2 = result.group(4).strip()
-            ans2 = result.group(5).strip()
+        soup = BeautifulSoup(html, "html.parser")
+        pure_text = soup.get_text(separator="\n")
+        print("页面纯文本:\n", pure_text[:1500])
+
+        # 匹配【月.日】后面两组问答，宽松匹配
+        pattern = re.compile(r"【(\d+\.\d+)】\s*(.*?？)\s*(\w+)\s*(.*?？)\s*(\w+)", re.S)
+        match = pattern.search(pure_text)
+        if match:
+            date_str = match.group(1).strip()
+            q1 = match.group(2).strip()
+            ans1 = match.group(3).strip()
+            q2 = match.group(4).strip()
+            ans2 = match.group(5).strip()
             out_text = f"📅 {date_str}\n1. {q1}\n✅答案：{ans1}\n\n2. {q2}\n✅答案：{ans2}"
             return out_text
         else:
-            print(f"页面{url}访问成功，纯文本解析后，未匹配问答")
-            # 调试：输出前1200字符纯文本，方便排查
-            print("页面纯文本片段：", pure_text[:1200])
+            print("未匹配问答")
             return None
     except Exception as e:
-        print(f"访问 {url} 失败: {str(e)}")
+        print(f"访问异常: {str(e)}")
         return None
 
 if __name__ == "__main__":
