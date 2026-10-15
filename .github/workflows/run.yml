@@ -1,9 +1,7 @@
 name: AntFarmScreenshot
 on:
-  workflow_dispatch: # 支持网页手动点按钮测试运行
+  workflow_dispatch:
   schedule:
-    # cron 是UTC时区！北京时间 = UTC+8
-    # 下面4条cron：北京时间 01:00、03:00、05:00、07:00
     - cron: '0 17 * * *'
     - cron: '0 19 * * *'
     - cron: '0 21 * * *'
@@ -12,29 +10,20 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - name: 拉取仓库代码
+      - name: 拉取代码
         uses: actions/checkout@v4
 
-      # 安装中文字体 + xvfb虚拟显示器（无头Chrome必需）
-      - name: 安装系统依赖
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-wqy-zenhei xvfb
-          fc-cache -fv
-
-      - name: 配置Python3环境
+      - name: 配置python3
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 安装Python依赖包
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install requests selenium webdriver-manager Pillow
+      - name: 安装依赖
+        run: pip3 install requests
 
-      - name: 运行Python脚本
+      - name: 执行脚本
         env:
           WECOM_WEBHOOK_KEY: ${{ secrets.WECOM_WEBHOOK_KEY }}
-        run: xvfb-run python3 antfarm.py
+        run: python3 antfarm.py
