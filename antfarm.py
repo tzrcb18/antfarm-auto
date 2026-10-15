@@ -56,15 +56,13 @@ def send_wecom_msg(img_path=None, fail_msg:str=None):
         print("告警推送结果：",resp.text)
         return
 
-    # ======修复40004核心：完整三元组上传======
     upload_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={WECOM_KEY}&type=image"
+    # 修复：直接打开文件句柄，不要f.read()
     with open(img_path, "rb") as f:
-        r_upload = requests.post(
-            upload_url,
-            files={
-                "media": ("screenshot.jpg", f.read(), "image/jpeg")
-            }
-        )
+        files_data = {
+            "media": ("screenshot.jpg", f, "image/jpeg")
+        }
+        r_upload = requests.post(upload_url, files=files_data)
     res_upload = r_upload.json()
     print("素材上传返回：", res_upload)
     if res_upload.get("errcode") !=0:
