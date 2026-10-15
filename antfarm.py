@@ -4,14 +4,16 @@ import requests
 import re
 
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
-# 优先游侠网链接，备用多特
 URL_LIST = [
-    "https://app.ali213.net/gl/562127.html",
-    "https://www.duotegame.com/mgl/25944.html"
+    "https://app.ali213.net/gl/562127.html"
 ]
 
+def remove_html_tags(text):
+    """删除全部html标签，只保留文字"""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
+
 def send_wechat_text(title, content):
-    """企业微信机器人推送markdown文字"""
     webhook = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_KEY}"
     msg = {
         "msgtype": "markdown",
@@ -30,10 +32,11 @@ def get_answer(url):
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
         html = resp.text
-
-        # 匹配【日期】后面的两组问答，游侠网页面专用正则
-        pattern = re.compile(r"【(\d+\.\d+)】\s*(.*?\？)\s*(\w+)\s*(.*?\？)\s*(\w+)", re.S)
-        result = pattern.search(html)
+        # 第一步：剥离所有HTML标签，拿到纯净文本
+        pure_text = remove_html_tags(html)
+        # 多行模式，宽松匹配【日期】，后面抓取两行问答，问号分割题目答案
+        pattern = re.compile(r"【(\d+\.\d+)】.*?([^？]+？)(\w+).*?([^？]+？)(\w+)", re.S)
+        result = pattern.search(pure_text)
         if result:
             date_str = result.group(1).strip()
             q1 = result.group(2).strip()
@@ -43,7 +46,9 @@ def get_answer(url):
             out_text = f"📅 {date_str}\n1. {q1}\n✅答案：{ans1}\n\n2. {q2}\n✅答案：{ans2}"
             return out_text
         else:
-            print(f"页面{url}访问成功，但是没有匹配到问答内容")
+            print(f"页面{url}访问成功，纯文本解析后，未匹配问答")
+            # 调试：输出前1200字符纯文本，方便排查
+            print("页面纯文本片段：", pure_text[:1200])
             return None
     except Exception as e:
         print(f"访问 {url} 失败: {str(e)}")
@@ -61,4 +66,4 @@ if __name__ == "__main__":
     if final_content:
         send_wechat_text("【蚂蚁庄园每日答案】", final_content)
     else:
-        send_wechat_text("【蚂蚁庄园任务告警】", "所有网页抓取失败，GitHub海外IP被拦截或者页面解析失败")
+        send_wechat_text("【蚂蚁庄园任务告警】", "页面解析失败，请检查页面结构")
