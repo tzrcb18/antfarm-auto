@@ -3,15 +3,16 @@ import os
 import requests
 import re
 from bs4 import BeautifulSoup
+from datetime import datetime
 
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
 URL_LIST = [
     "https://app.ali213.net/gl/562127.html"
 ]
+FLAG_FILE = "flag.txt"
 
 def send_wechat_text(title, content):
     webhook = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_KEY}"
-    # 改成 text 类型，个人微信可以直接看到内容！
     msg = {
         "msgtype": "text",
         "text": {
@@ -20,6 +21,7 @@ def send_wechat_text(title, content):
     }
     res = requests.post(webhook, json=msg)
     print("推送返回：", res.json())
+    return res.json()
 
 def get_answer(url):
     try:
@@ -51,6 +53,18 @@ def get_answer(url):
         return None
 
 if __name__ == "__main__":
+    today = datetime.now().strftime("%Y-%m-%d")
+    # 读取标记文件
+    flag_today = None
+    if os.path.exists(FLAG_FILE):
+        with open(FLAG_FILE, "r", encoding="utf-8") as f:
+            flag_today = f.read().strip()
+
+    if flag_today == today:
+        print(f"✅今日{today}已经推送成功，本次跳过执行")
+        exit(0)
+
+    # 没有标记，正常执行爬虫
     if not WECOM_KEY:
         send_wechat_text("配置错误", "仓库Secret WECOM_WEBHOOK_KEY未填写")
         exit(1)
@@ -61,5 +75,9 @@ if __name__ == "__main__":
             break
     if final_content:
         send_wechat_text("【蚂蚁庄园每日答案】", final_content)
+        # 推送成功！写入当日标记文件
+        with open(FLAG_FILE, "w", encoding="utf-8") as f:
+            f.write(today)
+        print(f"✅已写入今日标记 {today}")
     else:
         send_wechat_text("【蚂蚁庄园任务告警】", "页面解析失败，请检查页面结构")
