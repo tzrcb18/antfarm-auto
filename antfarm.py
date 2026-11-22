@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 import os
+import time
 import requests
 import re
 from bs4 import BeautifulSoup
-from datetime import datetime
 
 WECOM_KEY = os.getenv("WECOM_WEBHOOK_KEY")
 URL_LIST = [
     "https://app.ali213.net/gl/562127.html"
 ]
 FLAG_FILE = "flag.txt"
+
 
 def send_wechat_text(title, content):
     webhook = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={WECOM_KEY}"
@@ -23,61 +24,112 @@ def send_wechat_text(title, content):
     print("推送返回：", res.json())
     return res.json()
 
-def get_answer(url):
+
+def get_all_answers(url):
+    """解析页面所有【MM.DD】日期块，按页面顺序（新→旧）返回问答列表"""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "Chrome/120.0.0.0 Safari/537.36"
         }
         resp = requests.get(url, headers=headers, timeout=15)
         resp.encoding = "utf-8"
-        html = resp.text
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(resp.text, "html.parser")
         pure_text = soup.get_text(separator="\n")
-        print("页面纯文本:\n", pure_text[:1500])
+        print("页面文本片段:\n", pure_text[:3000])
 
-        pattern = re.compile(r"【(\d+\.\d+)】\s*(.*?？)\s*(\w+)\s*(.*?？)\s*(\w+)", re.S)
-        match = pattern.search(pure_text)
-        if match:
-            date_str = match.group(1).strip()
-            q1 = match.group(2).strip()
-            ans1 = match.group(3).strip()
-            q2 = match.group(4).strip()
-            ans2 = match.group(5).strip()
-            out_text = f"📅 {date_str}\n1. {q1}\n✅答案：{ans1}\n\n2. {q2}\n✅答案：{ans2}"
-            return out_text
-        else:
-            print("未匹配问答")
-            return None
+        block_pattern = re.compile(r"【(\d+\.\d+)】")
+        blocks = block_pattern.split(pure_text)
+        result = []
+        # blocks 结构: ["前缀文本", "11.13", "块内容", "11.12", "块内容", ...]
+        for i in range(1, len(blocks), 2):
+            date_str = blocks[i].strip()
+            block_content = blocks[i + 1].strip()
+            qa_pat = re.compile(r"(.*？)\s*([^\n]+)")
+            qa_list = qa_pat.findall(block_content)
+            qa_list = [(q.strip(), a.strip()) for q, a in qa_list
+                       if q.strip() and a.strip()]
+            if len(qa_list) >= 2:
+                result.append({
+                    "date": date_str,
+                    "q1": qa_list[0][0],
+                    "ans1": qa_list[0][1],
+                    "q2": qa_list[1][0],
+                    "ans2": qa_list[1][1]
+                })
+        print("页面解析到的日期顺序（从上到下=由新到旧）：",
+              [x["date"] for x in result])
+        return result
     except Exception as e:
-        print(f"访问异常: {str(e)}")
-        return None
+        print(f"访问/解析异常: {str(e)}")
+        return []
 
-if __name__ == "__main__":
-    today = datetime.now().strftime("%Y-%m-%d")
-    # 读取标记文件
-    flag_today = None
+
+def load_sent_dates():
+    sent = set()
     if os.path.exists(FLAG_FILE):
         with open(FLAG_FILE, "r", encoding="utf-8") as f:
-            flag_today = f.read().strip()
+            for line in f:
+                s = line.strip()
+                if s:
+                    sent.add(s)
+    return sent
 
-    if flag_today == today:
-        print(f"✅今日{today}已经推送成功，本次跳过执行")
-        exit(0)
 
-    # 没有标记，正常执行爬虫
+def save_sent_dates(sent_set):
+    with open(FLAG_FILE, "w", encoding="utf-8") as f:
+        for d in sent_set:
+            f.write(d + "\n")
+
+
+if __name__ == "__main__":
+    sent_dates = load_sent_dates()
+
     if not WECOM_KEY:
         send_wechat_text("配置错误", "仓库Secret WECOM_WEBHOOK_KEY未填写")
         exit(1)
-    final_content = None
+
+    all_items = []
     for link in URL_LIST:
-        final_content = get_answer(link)
-        if final_content:
-            break
-    if final_content:
-        send_wechat_text("【蚂蚁庄园每日答案】", final_content)
-        # 推送成功！写入当日标记文件
-        with open(FLAG_FILE, "w", encoding="utf-8") as f:
-            f.write(today)
-        print(f"✅已写入今日标记 {today}")
-    else:
-        send_wechat_text("【蚂蚁庄园任务告警】", "页面解析失败，请检查页面结构")
+        items = get_all_answers(link)
+        time.sleep(1)
+        all_items.extend(items)
+
+    if len(all_items) == 0:
+        send_wechat_text("【蚂蚁庄园任务告警】", "页面解析失败，没有抓到任何问答块")
+        exit(1)
+
+    # 只取页面最新的 2 条（列表前两位）
+    latest_two = all_items[:2]
+    print(f"选中页面最新两条日期：{[x['date'] for x in latest_two]}")
+
+    # 过滤掉当天已经推送过的日期
+    need_push = []
+    new_sent = set(sent_dates)
+    for it in latest_two:
+        d = it["date"]
+        if d not in sent_dates:
+            need_push.append(it)
+            new_sent.add(d)
+
+    # 两条都已经推送过 → 当天任务视为已完成，后续触发直接跳过，不发消息
+    if len(need_push) == 0:
+        print("✅ 最新两天答案均已推送过，本次跳过，等待第二天页面更新")
+        exit(0)
+
+    msg_parts = []
+    for it in need_push:
+        block = (
+            f"📅 {it['date']}\n"
+            f"1. {it['q1']}\n✅答案：{it['ans1']}\n\n"
+            f"2. {it['q2']}\n✅答案：{it['ans2']}\n"
+            "——————————\n"
+        )
+        msg_parts.append(block)
+    final_msg = "\n".join(msg_parts)
+
+    send_wechat_text("【蚂蚁庄园 最新答案】", final_msg)
+    save_sent_dates(new_sent)
+    print(f"✅推送完成，标记已写入本地flag，新增日期："
+          f"{[x['date'] for x in need_push]}")
+    exit(0)
